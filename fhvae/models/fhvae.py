@@ -9,7 +9,8 @@ from tensorflow.contrib.rnn.python.ops.core_rnn_cell import \
 sce_logits = tf.nn.sparse_softmax_cross_entropy_with_logits
 
 class FHVAE(object):
-    def __init__(self, xin, xout, y, n, nmu2):
+    def __init__(self, xin, xout, y, n, nmu2, cReg=[], nlabs=0):
+
         # encoder/decoder arch
         self.z1_rhus, self.z1_dim = [256, 256], 32
         self.z2_rhus, self.z2_dim = [256, 256], 32
@@ -21,6 +22,7 @@ class FHVAE(object):
         self.y = y
         self.n = n
         self.nmu2 = nmu2
+        self.cReg = cReg #dummy for now
         
         # latent vars
         self.mu2_table, self.mu2, self.qz2_x, self.z2_sample, self.qz1_x, \

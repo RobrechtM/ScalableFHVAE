@@ -7,7 +7,7 @@ np.random.seed(123)
 def load_data(name, set_name, is_numpy, seqlist_path):
     root = "./datasets/%s" % name
     mvn_path = "%s/train/mvn.pkl" % root
-    seg_len = 20
+    seg_len = 20 #15
     Dataset = NumpySegmentDataset if is_numpy else KaldiSegmentDataset
     
     dt_dset = Dataset(
@@ -30,7 +30,9 @@ def _load(dt_dset, dt_seqs):
         x = feats
         y = np.asarray([seq2idx[seq] for seq in seqs])
         n = np.asarray(nsegs)
-        return x, y, n
+        dummy = np.zeros((len(seqs),2),dtype=np.float32)
+        dummy2 = np.zeros((len(seqs),1),dtype=np.float32)
+        return x, y, n, dummy2, dummy
    
     def dt_iterator(bs=2048):
         seq2idx = dict([(seq, i) for i, seq in enumerate(dt_dset.seqlist)])

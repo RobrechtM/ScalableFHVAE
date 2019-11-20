@@ -90,10 +90,12 @@ def _valid(sess, model, sum_vars, iterator):
     _print_mu2_stat(mu2_dict)
     sum_vals = [0. for _ in xrange(len(sum_vars))]
     tot_segs = 0.
-    for x_val, y_val, n_val in iterator(bs=2048):
+    for x_val, y_val, n_val, b_val, c_val in iterator(bs=2048):
         mu2_val = _make_mu2(mu2_dict, y_val)
-        feed_dict = {model.xin: x_val, model.xout: x_val, 
-                model.n:n_val, model.mu2:mu2_val}
+        feed_dict = {model.xin: x_val, model.xout: x_val,
+                model.n:n_val, model.mu2:mu2_val, model.bReg:b_val, model.cReg:c_val}
+        # feed_dict = {model.xin: x_val, model.xout: x_val,
+        #         model.n:n_val, model.cReg:c_val}
         out = sess.run(sum_vars, feed_dict)
         for j, val in enumerate(out):
             sum_vals[j] += (val * len(x_val))
@@ -114,7 +116,7 @@ def _est_mu2_dict(sess, model, iterator):
     """
     nseg_table = defaultdict(float)
     z2_sum_table = defaultdict(float)
-    for x_val, y_val, _ in iterator():
+    for x_val, y_val, _, _ , _ in iterator():
         z2 = z2_mu_fn(sess, model, x_val)
         for _y, _z2 in zip(y_val, z2):
             z2_sum_table[_y] += _z2

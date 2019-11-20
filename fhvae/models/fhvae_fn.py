@@ -1,4 +1,5 @@
 import numpy as np
+import tensorflow as tf
 
 def z2_mu_fn(sess, model, x):
     return sess.run(model.qz2_x[0], {model.xin: x})
@@ -44,6 +45,36 @@ def map_mu2_z2_sum(model, z2_sum, n):
     """
     r = np.exp(model.pz2[1]) / np.exp(model.pmu2[1])
     return z2_sum / (n + r)
+
+def _softmax(x):
+    y=np.exp(x[:,1:])
+    return y/np.sum(y, axis=1, keepdims=True)
+
+def reg_posteriors_z2(sess, model, z2):
+    """
+    probabilities of each of the regularization classes, given a z2 or mean(z2)
+    Args:
+        z2(numpy.ndarray): n-by-(z2_dim) float matrix of z2's
+    Returns:
+        list of numpy.ndarray: n-by-(number_of_classes)
+    """
+    logits = sess.run(model.z2_rlogits, {model.qz2_x[0]: z2})
+    #logits = sess.run(model.z2_rlogits, {model.z2_sample: z2})
+    probs = map(_softmax,logits)
+    return probs
+
+def reg_posteriors_z1(sess, model, z1):
+    """
+    probabilities of each of the regularization classes, given a z1 or mean(z1)
+    Args:
+        z1(numpy.ndarray): n-by-(z1_dim) float matrix of z1's
+    Returns:
+        list of numpy.ndarray: n-by-(number_of_classes)
+    """
+    logits = sess.run(model.z1_rlogits, {model.qz1_x[0]: z1})
+    #logits = sess.run(model.z2_rlogits, {model.z2_sample: z2})
+    probs = map(_softmax,logits)
+    return probs
 
 def update_mu2_table(sess, model, mu2_table):
     """

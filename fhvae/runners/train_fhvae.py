@@ -9,13 +9,14 @@ from .fhvae_utils import load_prog, _valid
 SESS_CONF = tf.ConfigProto(allow_soft_placement=True)
 SESS_CONF.gpu_options.per_process_gpu_memory_fraction = 0.9
 
-def train(exp_dir, model, args, train_conf, tr_iterator, dt_iterator):
-    xin, xout, y, n = model.xin, model.xout, model.y, model.n
-    n_epochs, n_patience, n_steps_per_epoch, n_print_steps, alpha_dis = train_conf
-    adam_params = {"learning_rate":0.001, "beta1": 0.95, "beta2": 0.999}
+def  train(exp_dir, model, args, train_conf, tr_iterator, dt_iterator):
+    xin, xout, y, n, bReg, cReg = model.xin, model.xout, model.y, model.n, model.bReg, model.cReg
+    n_epochs, n_patience, n_steps_per_epoch, n_print_steps, alpha_dis, adam_eps, alpha_z1, alpha_z2 = train_conf
+    adam_params = {"learning_rate":0.001, "beta1": 0.95, "beta2": 0.999, "epsilon": adam_eps}
    
     # train objective
-    loss = -1 * tf.reduce_mean(model.lb + alpha_dis * model.log_qy)
+    loss = -1 * tf.reduce_mean(model.lb + alpha_dis * model.log_qy + alpha_z1 * tf.reduce_sum(model.log_b,axis=1) \
+           + alpha_z2 * tf.reduce_sum(model.log_c,axis=1))
     
     global_step_var = tf.Variable(0, trainable=False, name="global_step")
     opt = tf.train.AdamOptimizer(**adam_params)
@@ -25,9 +26,9 @@ def train(exp_dir, model, args, train_conf, tr_iterator, dt_iterator):
     apply_grad_op = opt.apply_gradients(grads, global_step=global_step_var)
     
     # summary stats
-    tr_sum_names = ["lb", "log_px_z", "neg_kld_z1", "neg_kld_z2", "log_pmu2", "log_qy"]
+    tr_sum_names = ["lb", "log_px_z", "neg_kld_z1", "neg_kld_z2", "log_pmu2", "log_qy", "log_b", "log_c"]
     tr_sum_vars = map(tf.reduce_mean, [model.__dict__[name] for name in tr_sum_names])
-    dt_sum_names = ["lb", "log_px_z", "neg_kld_z1", "neg_kld_z2", "log_pmu2"]
+    dt_sum_names = ["lb", "log_px_z", "neg_kld_z1", "neg_kld_z2", "log_pmu2", "log_b", "log_c"]
     dt_sum_vars = map(tf.reduce_mean, [model.__dict__[name] for name in dt_sum_names])
  
     # set exp
@@ -44,8 +45,11 @@ def train(exp_dir, model, args, train_conf, tr_iterator, dt_iterator):
             return True
         return False
 
-    def _feed_dict(x_val, y_val, n_val):
-        return {xin: x_val, xout:x_val, y:y_val, n:n_val}
+    def _feed_dict(x_val, y_val, n_val, b_val, c_val):
+        return {xin: x_val, xout:x_val, y:y_val, n:n_val, bReg:b_val, cReg:c_val}
+
+    # def _feed_dict(x_val, y_val, n_val):
+    #     return {xin: x_val, xout:x_val, y:y_val, n:n_val}
 
     def _save_prog(dt_sum_vals):
         prog.append([epoch, global_step, passes, best_epoch, best_dt_lb, 
@@ -74,7 +78,10 @@ def train(exp_dir, model, args, train_conf, tr_iterator, dt_iterator):
         cPickle.dump(args, f)
     saver = tf.train.Saver(max_to_keep=None)
 
+    print "numpy info %s" % np.__file__
+
     with tf.Session(config=SESS_CONF) as sess:
+        print "TF version %s" % tf.__version__
         stime = time.time()
         if global_step == 0:
             sess.run(tf.global_variables_initializer())
@@ -114,12 +121,12 @@ def train(exp_dir, model, args, train_conf, tr_iterator, dt_iterator):
             return is_best, dt_sum_vals
 
         while True:
-            for x_val, y_val, n_val in tr_iterator():
-                feed_dict = _feed_dict(x_val, y_val, n_val)
+            for x_val, y_val, n_val, b_val, c_val in tr_iterator():
+                feed_dict = _feed_dict(x_val, y_val, n_val, b_val, c_val)
                 global_step, _ = sess.run([global_step_var, apply_grad_op], feed_dict)
     
                 if global_step % n_print_steps == 0 and global_step != init_step:
-                    feed_dict = _feed_dict(x_val, y_val, n_val)
+                    feed_dict = _feed_dict(x_val, y_val, n_val, b_val, c_val)
                     tr_sum_vals = sess.run(tr_sum_vars, feed_dict)
                     is_diverged = _print_prog(tr_sum_names, tr_sum_vals)
                     if is_diverged:

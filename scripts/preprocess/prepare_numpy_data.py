@@ -42,7 +42,7 @@ def main(wav_scp, np_dir, feat_scp, len_scp, reader, mapper):
             if (i + 1) % 1000 == 0:
                 print("%s files, %.fs" % (i+1, time.time() - stime))
 
-    print "processed total %s audio files; time elapsed = %.fs" % (i + 1, time.time() - stime)
+	    print "processed total %s audio files; time elapsed = %.fs" % (i + 1, time.time() - stime)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)

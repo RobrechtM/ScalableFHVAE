@@ -5,10 +5,11 @@ import cPickle
 import numpy as np
 from collections import defaultdict
 import matplotlib
+import numpy as np
 matplotlib.use("Agg")
 from sklearn.manifold import TSNE
 import tensorflow as tf
-from ..models.fhvae_fn import z1_mu_fn, z2_mu_fn, x_mu_fn, x_logvar_fn, map_mu2_z2
+from ..models.fhvae_fn import z1_mu_fn, z2_mu_fn, x_mu_fn, x_logvar_fn, map_mu2_z2, reg_posteriors_z1, reg_posteriors_z2
 from .fhvae_utils import restore_model, _valid
 from .plotter import plot_x, scatter_plot
 
@@ -54,12 +55,28 @@ def visualize(exp_dir, step, model, iterator_by_seqs, seqs):
     """
     visualize reconstruction, factorization, sequence-translation
     """
-    if len(seqs) > 10:
-        print(">10 seqs. randomly select 10 seqs for visualization")
-        seqs = sorted(list(np.random.choice(seqs, 10, replace=False)))
+    if False:
+        if len(seqs) > 25:
+            print(">25 seqs. randomly select 25 seqs for visualization")
+            seqs = sorted(list(np.random.choice(seqs, 25, replace=False)))
     
     try:
         os.makedirs("%s/img" % exp_dir)
+    except OSError:
+        pass
+
+    try:
+        os.makedirs("%s/spec" % exp_dir)
+    except OSError:
+        pass
+
+    try:
+        os.makedirs("%s/wav" % exp_dir)
+    except OSError:
+        pass
+
+    try:
+        os.makedirs("%s/txt" % exp_dir)
     except OSError:
         pass
 
@@ -73,76 +90,161 @@ def visualize(exp_dir, step, model, iterator_by_seqs, seqs):
         z1_by_seq = defaultdict(list)
         z2_by_seq = defaultdict(list)
         mu2_by_seq = dict()
+        regpost_by_seq = dict()
         xin_by_seq = defaultdict(list)
         xout_by_seq = defaultdict(list)
         xoutv_by_seq = defaultdict(list)
+        z1reg_by_seq = defaultdict(list)
         for seq in seqs:
-            for x, _, _ in iterator_by_seqs([seq]):
+            for x, _, _ , _ , _ in iterator_by_seqs([seq]):
                 z2 = z2_mu_fn(sess, model, x)
                 z1 = z1_mu_fn(sess, model, x, z2)
                 xout = x_mu_fn(sess, model, z1, z2)
                 xoutv = x_logvar_fn(sess, model, z1, z2)
+                z1reg = reg_posteriors_z1(sess, model, z1)
                 z1_by_seq[seq].append(z1)
                 z2_by_seq[seq].append(z2)
                 xin_by_seq[seq].append(x)
                 xout_by_seq[seq].append(xout)
                 xoutv_by_seq[seq].append(xoutv)
+                z1reg_by_seq[seq] = z1reg
             z1_by_seq[seq] = np.concatenate(z1_by_seq[seq], axis=0)
             z2_by_seq[seq] = np.concatenate(z2_by_seq[seq], axis=0)
             xin_by_seq[seq] = np.concatenate(xin_by_seq[seq], axis=0)
             xout_by_seq[seq] = np.concatenate(xout_by_seq[seq], axis=0)
             xoutv_by_seq[seq] = np.concatenate(xoutv_by_seq[seq], axis=0)
+            #z1reg_by_seq[seq] = np.concatenate(z1reg_by_seq[seq], axis=0)
             mu2_by_seq[seq] = map_mu2_z2(model, z2_by_seq[seq])
+            d2 = mu2_by_seq[seq].shape[0]
+            z2 = np.asarray(mu2_by_seq[seq]).reshape([1,d2])
+            regpost_by_seq[seq] = reg_posteriors_z2(sess, model, z2)
 
+        # # save the mu2
+        # f = open("mu2_by_seq.txt","w")
+        # for seq in seqs:
+        #     f.write( ' '.join (map(str,mu2_by_seq[seq])) )
+        #     f.write('\n')
+        # f.close()
+        #
+        # save the mean mu2
+        if not os.path.exists("%s/mu2_by_seq.npy" % exp_dir):
+            mumu = np.zeros([mu2_by_seq[seqs[1]].size])
+            for seq in seqs:
+                mumu += mu2_by_seq[seq]
+            mumu /= len(seqs)
+            with open("%s/mu2_by_seq.npy" % exp_dir, "wb") as fnp:
+                np.save(fnp, mumu)
+
+        if True:
+            names = ["reg1","gender"] # toegegeven, nie proper
+            for i, name in enumerate(names):
+                with open("%s/txt/%s.scp" % (exp_dir, name), "wb") as f:
+                    for seq in seqs:
+                        f.write(seq + "  [ ")
+                        for e in np.nditer(regpost_by_seq[seq][i]):
+                            f.write("%10.3f " % e)
+                        f.write("]\n")
+
+        if True:
+            names = ["pho"] # toegegeven, nie proper
+            for i, name in enumerate(names):
+                try:
+                    os.makedirs("%s/txt/%s" % (exp_dir, name))
+                except OSError:
+                    pass
+                for seq in seqs:
+                    np.save("%s/txt/%s/%s" % (exp_dir, name, seq), z1reg_by_seq[seq][i])
+
+        seqs = sorted(list(np.random.choice(seqs, 10, replace=False)))
         seq_names = ["%02d_%s" % (i, seq) for i, seq in enumerate(seqs)]
 
-        # visualize reconstruction
-        print "visualizing reconstruction"
-        plot_x([xin_by_seq[seq] for seq in seqs], seq_names, "%s/img/xin.png" % exp_dir)
-        plot_x([xout_by_seq[seq] for seq in seqs], seq_names, "%s/img/xout.png" % exp_dir)
-        plot_x([xoutv_by_seq[seq] for seq in seqs], seq_names, 
-                "%s/img/xout_logvar.png" % exp_dir, clim=(None, None))
-        
-        # factorization: use the centered segment from each sequence
-        print "visualizing factorization"
-        cen_z1 = np.array([z1_by_seq[seq][len(z1_by_seq[seq]) / 2] for seq in seqs])
-        cen_z2 = np.array([z2_by_seq[seq][len(z2_by_seq[seq]) / 2] for seq in seqs])
-        xfac = []
-        for z1 in cen_z1:
-            z1 = np.tile(z1, (len(cen_z2), 1))
-            xfac.append(x_mu_fn(sess, model, z1, cen_z2))
-        plot_x(xfac, seq_names, "%s/img/xfac.png" % exp_dir, sep=True)
+        if True:
+            # visualize reconstruction
+            print "visualizing reconstruction"
+            plot_x([xin_by_seq[seq] for seq in seqs], seq_names, "%s/img/xin.png" % exp_dir)
+            plot_x([xout_by_seq[seq] for seq in seqs], seq_names, "%s/img/xout.png" % exp_dir)
+            plot_x([xoutv_by_seq[seq] for seq in seqs], seq_names,
+                    "%s/img/xout_logvar.png" % exp_dir, clim=(None, None))
 
-        # sequence translation
-        print "visualizing sequence translation"
-        xtra_by_seq = dict()
-        for src_seq, src_seq_name in zip(seqs, seq_names):
-            xtra_by_seq[src_seq] = dict()
-            src_z1, src_z2 = z1_by_seq[src_seq], z2_by_seq[src_seq]
-            for tar_seq in seqs:
-                del_mu2 = mu2_by_seq[tar_seq] - mu2_by_seq[src_seq]
-                xtra_by_seq[src_seq][tar_seq] = _seq_translate(
-                        sess, model, src_z1, src_z2, del_mu2)
-            plot_x([xtra_by_seq[src_seq][seq] for seq in seqs], seq_names, 
-                    "%s/img/%s_tra.png" % (exp_dir, src_seq_name))
+        if True:
+            # factorization: use the centered segment from each sequence
+            print "visualizing factorization"
+            cen_z1 = np.array([z1_by_seq[seq][len(z1_by_seq[seq]) / 2] for seq in seqs])
+            cen_z2 = np.array([z2_by_seq[seq][len(z2_by_seq[seq]) / 2] for seq in seqs])
+            xfac = []
+            for z1 in cen_z1:
+                z1 = np.tile(z1, (len(cen_z2), 1))
+                xfac.append(x_mu_fn(sess, model, z1, cen_z2))
+            plot_x(xfac, seq_names, "%s/img/xfac.png" % exp_dir, sep=True)
 
-        # tsne z1 and z2
-        print "t-SNE analysis on latent variables"
-        n = [len(z1_by_seq[seq]) for seq in seqs]
-        z1 = np.concatenate([z1_by_seq[seq] for seq in seqs], axis=0)
-        z2 = np.concatenate([z2_by_seq[seq] for seq in seqs], axis=0)
-        
-        p = 30
-        print "  perplexity = %s" % p
-        tsne = TSNE(n_components=2, verbose=0, perplexity=p, n_iter=1000)
-        z1_tsne = _unflatten(tsne.fit_transform(z1), n)
-        scatter_plot(z1_tsne, seq_names, "z1_tsne_%03d" % p, 
-                "%s/img/z1_tsne_%03d.png" % (exp_dir, p))
-        z2_tsne = _unflatten(tsne.fit_transform(z2), n)
-        scatter_plot(z2_tsne, seq_names, "z2_tsne_%03d" % p, 
-                "%s/img/z2_tsne_%03d.png" % (exp_dir, p))
+        if True:
+            #with open( "./datasets/cgn_np_fbank/train/mvn.pkl" ) as f:
+            #with open( "./datasets/timit_np_fbank/train/mvn.pkl" ) as f:
+            #with open( "./datasets/cgn_per_speaker/train/mvn.pkl" ) as f:
+            #with open( "./datasets/grabo_np_fbank/train/mvn.pkl" ) as f:
+            with open( "./datasets/cgn_per_speaker_afgklno/train/mvn.pkl" ) as f:
+                mvn_params = cPickle.load(f)
+            nb_mel = mvn_params[ "mean"].size
+
+            for src_seq, src_seq_name in zip(seqs, seq_names):
+                with open("%s/spec/xin_%s.npy" % (exp_dir, src_seq), "wb") as fnp:
+                    np.save(fnp, np.reshape(xin_by_seq[src_seq],(-1,nb_mel)) * mvn_params["std"] + mvn_params["mean"])
+                with open("%s/spec/xout_%s.npy" % (exp_dir, src_seq), "wb") as fnp:
+                    np.save(fnp, np.reshape(xout_by_seq[src_seq],(-1,nb_mel)) * mvn_params["std"] + mvn_params["mean"])
+
+        if True:
+            # sequence neutralisation
+            print "visualizing neutral sequences"
+            neu_by_seq = dict()
+            with open("%s/mu2_by_seq.npy" % exp_dir, "rb") as fnp:
+                mumu = np.load(fnp)
+            for src_seq, src_seq_name in zip(seqs, seq_names):
+                    del_mu2 = mumu - mu2_by_seq[src_seq]
+                    src_z1, src_z2 = z1_by_seq[src_seq], z2_by_seq[src_seq]
+                    neu_by_seq[src_seq] = _seq_translate(
+                            sess, model, src_z1, src_z2, del_mu2)
+                    with open("%s/spec/neu_%s.npy" % (exp_dir, src_seq), "wb") as fnp:
+                        np.save(fnp, np.reshape(neu_by_seq[src_seq],(-1,nb_mel)) * mvn_params["std"] + mvn_params["mean"] )
+
+            plot_x([neu_by_seq[seq] for seq in seqs], seq_names,
+                        "%s/img/neutral.png" % exp_dir, False)
+
+        if True:
+            # sequence translation
+            print "visualizing sequence translation"
+            xtra_by_seq = dict()
+            for src_seq, src_seq_name in zip(seqs, seq_names):
+                xtra_by_seq[src_seq] = dict()
+                src_z1, src_z2 = z1_by_seq[src_seq], z2_by_seq[src_seq]
+                for tar_seq in seqs:
+                    del_mu2 = mu2_by_seq[tar_seq] - mu2_by_seq[src_seq]
+                    xtra_by_seq[src_seq][tar_seq] = _seq_translate(
+                            sess, model, src_z1, src_z2, del_mu2)
+                    with open("%s/spec/src_%s_tar_%s.npy" % (exp_dir, src_seq, tar_seq), "wb") as fnp:
+                        np.save(fnp, np.reshape(xtra_by_seq[src_seq][tar_seq],(-1,nb_mel)) * mvn_params["std"] + mvn_params["mean"])
+
+                plot_x([xtra_by_seq[src_seq][seq] for seq in seqs], seq_names,
+                        "%s/img/%s_tra.png" % (exp_dir, src_seq_name), True)
+
+        if True:
+            # tsne z1 and z2
+            print "t-SNE analysis on latent variables"
+            n = [len(z1_by_seq[seq]) for seq in seqs]
+            z1 = np.concatenate([z1_by_seq[seq] for seq in seqs], axis=0)
+            z2 = np.concatenate([z2_by_seq[seq] for seq in seqs], axis=0)
+
+            p = 30
+            print "  perplexity = %s" % p
+            tsne = TSNE(n_components=2, verbose=0, perplexity=p, n_iter=1000)
+            z1_tsne = _unflatten(tsne.fit_transform(z1), n)
+            scatter_plot(z1_tsne, seq_names, "z1_tsne_%03d" % p,
+                    "%s/img/z1_tsne_%03d.png" % (exp_dir, p))
+            z2_tsne = _unflatten(tsne.fit_transform(z2), n)
+            scatter_plot(z2_tsne, seq_names, "z2_tsne_%03d" % p,
+                    "%s/img/z2_tsne_%03d.png" % (exp_dir, p))
 
 def tsne_by_label(exp_dir, step, model, iterator_by_seqs, seqs, seq2lab_d):
+    seqs = sorted(list(np.random.choice(seqs, 25, replace=False)))
     saver = tf.train.Saver()
     with tf.Session(config=SESS_CONF) as sess:
         restore_model(sess, saver, "%s/models" % exp_dir, step)
@@ -151,7 +253,7 @@ def tsne_by_label(exp_dir, step, model, iterator_by_seqs, seqs, seq2lab_d):
         z1_by_seq = defaultdict(list)
         z2_by_seq = defaultdict(list)
         for seq in seqs:
-            for x, _, _ in iterator_by_seqs([seq]):
+            for x, _, _ , _ , _ in iterator_by_seqs([seq]):
                 z2 = z2_mu_fn(sess, model, x)
                 z1 = z1_mu_fn(sess, model, x, z2)
                 z1_by_seq[seq].append(z1)

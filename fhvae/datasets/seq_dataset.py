@@ -4,6 +4,8 @@ import bisect
 import cPickle
 import librosa
 from collections import OrderedDict
+from collections import Counter
+from scipy.stats import entropy
 from kaldi_io import SequentialBaseFloatMatrixReader as SBFMReader
 from kaldi_io import RandomAccessBaseFloatMatrixReader as RABFMReader
 from .audio_utils import *
@@ -16,9 +18,40 @@ def scp2dict(path, dtype=str, seqlist=None):
         d = subset_d(d, seqlist)
     return d
 
-def load_lab(spec, seqlist=None):
-    name, nclass, path = spec
-    seq2lab = scp2dict(path, int, seqlist)
+def load_lab(spec, seqlist=None, copy_from=None):
+    if len(spec)==3:
+        name, nclass, path = spec
+        seq2lab = scp2dict(path, int, seqlist)
+    else:
+        name, path = spec
+        seq2lab = scp2dict(path, str, seqlist)
+        # clean up unused or underrepresented labels
+        if copy_from is None:
+            u_lab = Counter(seq2lab.values())
+            # ignore classes ending in "X"
+            for lab in u_lab.keys():
+                if lab[-1].upper() == "X" or len(lab)==0:
+                    del u_lab[lab]
+            # ignore classes below frequency threshold
+            ntot = sum(u_lab.values())
+            pp = np.exp(entropy(u_lab.values()))  # perplexity
+            if pp < 100.0:
+                # delete classes which are underrepresented, except for e.g. speaker ID (pp > 100)
+                for lab in u_lab.keys():
+                    if u_lab[lab] < ntot / (10.0 * pp):
+                        del u_lab[lab]
+            u_lab = u_lab.keys()
+        else:
+            u_lab = copy_from.labs_d[name].lablist
+
+        # remove eliminated labels from seq2lab
+        for k in seq2lab.keys():
+            if seq2lab[k] not in u_lab:
+                seq2lab[k]=""
+
+        nclass = len(u_lab)
+        if "" not in u_lab:
+            nclass+=1 # signal empty label should be added (unknown class)
     return name, nclass, seq2lab
 
 def subset_d(d, l):
@@ -30,25 +63,34 @@ def subset_d(d, l):
         new_d[k] = d[k]
     return new_d
 
-def load_talab(spec, seqlist=None):
+def load_talab(spec, seqlist=None, copy_from = None):
     name, nclass, path = spec
-    with open(path) as f:
-        toks_l = [line.rstrip().split() for line in f]
-    assert(len(toks_l) > 0 and len(toks_l[0]) == 1)
-    seq2talabseq = OrderedDict()
-    seq = toks_l[0][0]
-    talabs = []
-    for toks in toks_l[1:]:
-        if len(toks) == 1:
-            seq2talabseq[seq] = TimeAlignedLabelSeq(talabs)
-            seq = toks[0]
-            talabs = []
-        elif len(toks) == 3:
-            talab = TimeAlignedLabel(int(toks[2]), int(toks[0]), int(toks[1]))
-            talabs.append(talab)
-        else:
-            raise ValueError("invalid line %s" % str(toks))
-    seq2talabseq[seq] = TimeAlignedLabelSeq(talabs)
+    if copy_from == None:
+        with open(path + '.' + name) as f:
+            toks_l = [line.rstrip().split() for line in f]
+        assert(len(toks_l) > 0 and len(toks_l[0]) == 1)
+        seq2talabseq = OrderedDict()
+        seq = toks_l[0][0]
+        talabs = []
+        for toks in toks_l[1:]:
+            if len(toks) == 1:
+                seq2talabseq[seq] = TimeAlignedLabelSeq(talabs)
+                seq = toks[0]
+                talabs = []
+            elif len(toks) == 3: # format start stop label
+                talab = TimeAlignedLabel(int(toks[2]), int(toks[0]), int(toks[1]))
+                talabs.append(talab)
+            else:
+                raise ValueError("invalid line %s" % str(toks))
+        seq2talabseq[seq] = TimeAlignedLabelSeq(talabs)
+    else:
+        seq2talabseq = copy_from.talabseqs_d[name].seq2talabseq
+    alllab=set()
+    for k in seq2talabseq.keys():
+        alllab.update(set(seq2talabseq[k].lablist) )
+    nclass=len(alllab)
+#    for k in seg2talabseq.keys():
+#        append(alllab,seg2talabseq[k].lablist)
     return name, nclass, seq2talabseq
 
 class TimeAlignedLabel(object):
@@ -188,10 +230,12 @@ class Labels(object):
     def lablist(self):
         if not hasattr(self, "_lablist"):
             self._lablist = sorted(np.unique(self.seq2lab.values()))
+            if len(self._lablist)<self.nclass:
+                self._lablist.insert(0,"") # assumes "" always ends up first if it is already in lablist
         return self._lablist
 
 class SequenceDataset(object):
-    def __init__(self, feat_scp, len_scp, lab_specs=[], talab_specs=[], min_len=1):
+    def __init__(self, feat_scp, len_scp, lab_specs=[], talab_specs=[], min_len=1, copy_from=None):
         """
         Args:
             feat_scp(str): feature scp path
@@ -201,6 +245,8 @@ class SequenceDataset(object):
             talab_specs(list): list of time-aligned label specifications.
                 each is (name, number of classes, ali path)
             min_len(int): keep sequence no shorter than min_len
+            copy_from: a SequenceDataset from which to copy the labs_d dictionary.
+                Used such that train and dev set use same labels.
         """
         feats = scp2dict(feat_scp)
         lens = scp2dict(len_scp, int, feats.keys())
@@ -213,11 +259,14 @@ class SequenceDataset(object):
         
         self.labs_d = OrderedDict()
         for lab_spec in lab_specs:
-            name, nclass, seq2lab = load_lab(lab_spec, self.seqlist)
+            if lab_spec[0] == "spk": # don't copy speaker info: dev speakers don't overlap with trn speakers in mu2-table
+                name, nclass, seq2lab = load_lab(lab_spec, self.seqlist)
+            else:
+                name, nclass, seq2lab = load_lab(lab_spec, self.seqlist, copy_from)
             self.labs_d[name] = Labels(name, nclass, seq2lab)
         self.talabseqs_d = OrderedDict()
         for talab_spec in talab_specs:
-            name, nclass, seq2talabs = load_talab(talab_spec, self.seqlist)
+            name, nclass, seq2talabs = load_talab(talab_spec, self.seqlist, copy_from)
             self.talabseqs_d[name] = TimeAlignedLabelSeqs(name, nclass, seq2talabs)
 
     def iterator(self, bs, lab_names=[], talab_names=[], seqs=None, 
@@ -244,12 +293,12 @@ class SequenceDataset(object):
             np.random.shuffle(seqs)
 
         keys, feats, lens, labs, talabs = [], [], [], [], []
-        for seq in seqs:
+        for seq in seqs: # e.g. all of the training set
             keys.append(seq)
-            feats.append(mapper(self.feats[seq]))
+            feats.append(mapper(self.feats[seq])) # loads the whole file
             lens.append(self.lens[seq])
             labs.append([self.labs_d[name][seq] for name in lab_names])
-            talabs.append([self.talabseqs_d[name][seq] for name in talab_names])
+            talabs.append([self.talabseqs_d[name].seq2talabseq[seq] for name in talab_names])
             if len(keys) == bs:
                 yield keys, feats, lens, labs, talabs
                 keys, feats, lens, labs, talabs = [], [], [], [], []
@@ -330,9 +379,9 @@ class KaldiDataset(SequenceDataset):
 
 class NumpyDataset(SequenceDataset):
     def __init__(self, feat_scp, len_scp, lab_specs=[], talab_specs=[],
-            min_len=1, preload=False, mvn_path=None):
+            min_len=1, preload=False, mvn_path=None, copy_from=None):
         super(NumpyDataset, self).__init__(
-                feat_scp, len_scp, lab_specs, talab_specs, min_len)
+                feat_scp, len_scp, lab_specs, talab_specs, min_len, copy_from)
         if preload:
             feats = OrderedDict()
             for seq in self.seqlist:
