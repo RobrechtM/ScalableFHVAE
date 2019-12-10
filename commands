@@ -1,0 +1,13 @@
+python ./scripts/preprocess/prepare_kaldi_data.py fhvae/datasets/timit/dev/wav.scp2 fhvae/datasets/timit/dev/feats.ark fhvae/datasets/timit/dev/feats.scp fhvae/datasets/timit/dev/len.scp
+ssh -XC fasso
+nvidia-smi
+export CUDA_VISIBLE_DEVICES=0
+python ./examples/prepare_timit_numpy.py /users/spraak/spchdata/timit/CDdata/timit
+python ./scripts/train/run_hs_train.py --dataset=timit_np_fbank --is_numpy --nmu2=2000
+condor_submit script=hs_train run_script_GPU.job
+condor_submit script=hs_train hs_train_cgn.job
+
+python scripts/eval/run_eval.py /esat/spchtemp/scratch/hvanhamm/fhvae_timit/exp/cgn_per_speaker/nogau_reg_fhvae_e99_s5000_p10_a10.0_b10.0_c10.0_e0.01 --seqlist=./misc/timit_eval.txt
+
+
+python scripts/eval/run_eval.py /esat/spchtemp/scratch/hvanhamm/fhvae_timit/exp/cgn_per_speaker/nogau_reg_fhvae_e99_s5000_p10_a10.0_b10.0_c10.0_e0.01 --seqlist=./misc/timit_eval.txt --dataset=timit_np_fbank 

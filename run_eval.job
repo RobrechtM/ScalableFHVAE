@@ -1,0 +1,16 @@
+RequestCpus     = 1
+RequestMemory   = 16G
+Request_GPUS    = 1
++RequestWallTime = 1*60*60
+
+
+Requirements = ( CUDAGlobalMemoryMb > 8192 ) && (CUDACapability >= 3.0) && (machine != "pyrite.esat.kuleuven.be") && (machine != "goryu.esat.kuleuven.be") && (machine != "larimar.esat.kuleuven.be") && machine != "garnet.esat.kuleuven.be" && machine != "estragon.esat.kuleuven.be"
+# (machine == "spchcl23.esat.kuleuven.be")
+
+executable = run_eval.sh
+
+Log        = condor.log
+Output     = condor.out
+Error      = condor.err
+
+Queue 1

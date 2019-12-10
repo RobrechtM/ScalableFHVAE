@@ -135,7 +135,7 @@ def visualize(exp_dir, step, model, iterator_by_seqs, seqs):
             with open("%s/mu2_by_seq.npy" % exp_dir, "wb") as fnp:
                 np.save(fnp, mumu)
 
-        if True:
+        if False:
             names = ["reg1","gender"] # toegegeven, nie proper
             for i, name in enumerate(names):
                 with open("%s/txt/%s.scp" % (exp_dir, name), "wb") as f:
@@ -145,7 +145,7 @@ def visualize(exp_dir, step, model, iterator_by_seqs, seqs):
                             f.write("%10.3f " % e)
                         f.write("]\n")
 
-        if True:
+        if False:
             names = ["pho"] # toegegeven, nie proper
             for i, name in enumerate(names):
                 try:
@@ -158,7 +158,7 @@ def visualize(exp_dir, step, model, iterator_by_seqs, seqs):
         seqs = sorted(list(np.random.choice(seqs, 10, replace=False)))
         seq_names = ["%02d_%s" % (i, seq) for i, seq in enumerate(seqs)]
 
-        if True:
+        if False:
             # visualize reconstruction
             print "visualizing reconstruction"
             plot_x([xin_by_seq[seq] for seq in seqs], seq_names, "%s/img/xin.png" % exp_dir)
@@ -166,7 +166,7 @@ def visualize(exp_dir, step, model, iterator_by_seqs, seqs):
             plot_x([xoutv_by_seq[seq] for seq in seqs], seq_names,
                     "%s/img/xout_logvar.png" % exp_dir, clim=(None, None))
 
-        if True:
+        if False:
             # factorization: use the centered segment from each sequence
             print "visualizing factorization"
             cen_z1 = np.array([z1_by_seq[seq][len(z1_by_seq[seq]) / 2] for seq in seqs])
@@ -185,6 +185,7 @@ def visualize(exp_dir, step, model, iterator_by_seqs, seqs):
             with open( "./datasets/cgn_per_speaker_afgklno/train/mvn.pkl" ) as f:
                 mvn_params = cPickle.load(f)
             nb_mel = mvn_params[ "mean"].size
+            # exp_dir = '.' # RM 
 
             for src_seq, src_seq_name in zip(seqs, seq_names):
                 with open("%s/spec/xin_%s.npy" % (exp_dir, src_seq), "wb") as fnp:
@@ -192,7 +193,7 @@ def visualize(exp_dir, step, model, iterator_by_seqs, seqs):
                 with open("%s/spec/xout_%s.npy" % (exp_dir, src_seq), "wb") as fnp:
                     np.save(fnp, np.reshape(xout_by_seq[src_seq],(-1,nb_mel)) * mvn_params["std"] + mvn_params["mean"])
 
-        if True:
+        if False:
             # sequence neutralisation
             print "visualizing neutral sequences"
             neu_by_seq = dict()
@@ -209,14 +210,14 @@ def visualize(exp_dir, step, model, iterator_by_seqs, seqs):
             plot_x([neu_by_seq[seq] for seq in seqs], seq_names,
                         "%s/img/neutral.png" % exp_dir, False)
 
-        if True:
+        if False:
             # sequence translation
             print "visualizing sequence translation"
             xtra_by_seq = dict()
             for src_seq, src_seq_name in zip(seqs, seq_names):
                 xtra_by_seq[src_seq] = dict()
                 src_z1, src_z2 = z1_by_seq[src_seq], z2_by_seq[src_seq]
-                for tar_seq in seqs:
+                for tar_seq in seqs: # TODO: reduce to smaller size
                     del_mu2 = mu2_by_seq[tar_seq] - mu2_by_seq[src_seq]
                     xtra_by_seq[src_seq][tar_seq] = _seq_translate(
                             sess, model, src_z1, src_z2, del_mu2)
