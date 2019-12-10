@@ -1,3 +1,5 @@
 *.sw?
 *.py?
 exp*
+misc/*
+jobs/*
