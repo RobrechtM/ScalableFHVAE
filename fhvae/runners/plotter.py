@@ -1,10 +1,14 @@
+import matplotlib
+matplotlib.use('Agg')  # nopep8
 import matplotlib.pyplot as plt
+import matplotlib.cm as cm
 import numpy as np
+
 
 def scatter_plot(m_l, y_l, title, path):
     """
     scatter plot for 2D matrix m
-    
+
     Args:
         m_l(list): list of n-by-2 matrix
         y_l(list): list of len(m) labels
@@ -13,17 +17,19 @@ def scatter_plot(m_l, y_l, title, path):
     fig = plt.figure(figsize=(8, 8))
     ax = fig.add_subplot(1, 1, 1)
     p_l = []
-    for m, y in zip(m_l, y_l):
-        p_l.append(plt.scatter(m[:, 0], m[:, 1], alpha=.8))
+    colors = cm.tab20(np.linspace(0, 1, len(y_l)))
+    for m, y, c in zip(m_l, y_l, colors):
+        p_l.append(plt.scatter(m[:, 0], m[:, 1], alpha=.8, c=c))
     ax.legend(p_l, y_l)
     ax.set_title(title)
     plt.savefig(path, bbox_inches="tight")
     plt.close()
-    
+
+
 def plot_x(x_l, seqs, path, sep=False, clim=(-2., 2.)):
     """
     plot spectrogram
-    
+
     Args:
         x_l(list): list of n-by-T-by-F numpy.ndarray matrix of segment spectrograms
         seqs(list): list of sequence names
@@ -33,7 +39,7 @@ def plot_x(x_l, seqs, path, sep=False, clim=(-2., 2.)):
     """
     fig = plt.figure(figsize=(16, 16))
     nrows = len(x_l)
-    
+
     x_l = pad_x(x_l)
     for i in xrange(len(x_l)):
         x_2d = to_img(x_l[i], sep)
@@ -44,6 +50,7 @@ def plot_x(x_l, seqs, path, sep=False, clim=(-2., 2.)):
     plt.tight_layout()
     plt.savefig(path, bbox_inches="tight")
     plt.close()
+
 
 def pad_x(x_l):
     """
@@ -62,6 +69,7 @@ def pad_x(x_l):
         this_pad = np.tile(pad, (max_n - x_l[i].shape[0], 1, 1))
         x_l[i] = np.concatenate([x_l[i], this_pad], axis=0)
     return x_l
+
 
 def to_img(x, sep):
     """
