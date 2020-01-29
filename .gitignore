@@ -1,7 +1,11 @@
 *.sw?
 *.py?
+*.job
+*.npy
 exp*
 misc/*
 jobs/*
 datasets/*
+models/*
 .vscode/*
+commands
